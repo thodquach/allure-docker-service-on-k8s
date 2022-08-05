@@ -1,0 +1,74 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: allure-fe-dev
+  namespace: dev
+data:
+  ALLURE_DOCKER_PUBLIC_API_URL: "https://allure-dev.example.com"
+  ALLURE_DOCKER_PUBLIC_API_URL_PREFIX: "/be"
+  URL_PREFIX: "/fe"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: allure-fe-dev
+  namespace: dev
+  labels:
+    app: allure-fe-dev
+    chart: allure-be-0.1.0
+    release: allure-fe-dev
+    heritage: Helm
+spec:
+  type: NodePort
+  ports:
+    - port: 80
+      targetPort: 5252
+      protocol: TCP
+      name: http
+  selector:
+    app: allure-fe-dev
+    chart: allure-be-0.1.0
+    release: allure-fe-dev
+    heritage: Helm
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: allure-fe-dev
+  namespace: dev
+spec:
+  replicas: 1
+  strategy:
+    type: "Recreate"
+  selector:
+    matchLabels:
+      app: allure-fe-dev
+      chart: allure-be-0.1.0
+      release: allure-fe-dev
+      heritage: Helm
+  strategy:
+    type: "Recreate"
+  template:
+    metadata:
+      annotations:
+        checksum: checksum17
+      name: allure-fe-dev
+      labels:
+        app: allure-fe-dev
+        chart: allure-be-0.1.0
+        release: allure-fe-dev
+        heritage: Helm
+    spec:
+      containers:
+        - name: allure-fe-dev
+          image: 'frankescobar/allure-docker-service-ui'
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5252
+          # securityContext:
+          #   runAsUser: 1000
+          #   runAsGroup: 1000
+          envFrom:
+            - configMapRef:
+                name: allure-fe-dev

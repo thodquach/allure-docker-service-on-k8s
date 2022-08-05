@@ -1,0 +1,210 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: allure-be-dev
+  namespace: dev
+data:
+  CHECK_RESULTS_EVERY_SECONDS: NONE
+  KEEP_HISTORY: "1"
+  KEEP_HISTORY_LATEST: "25"
+  SECURITY_ENABLED: "1"
+  URL_PREFIX: "/be"
+  # TLS: "1"
+  # MAKE_VIEWER_ENDPOINTS_PUBLIC: "0"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: allure-be-dev
+  namespace: dev
+type: Opaque
+data:
+  #echo -n 'user' | base64
+  SECURITY_USER: dXNlcg==
+  #echo -n 'password' | base64
+  SECURITY_PASS: cGFzc3dvcmQ=
+  #echo -n 'viewonly' | base64
+  SECURITY_VIEWER_USER: dmlld29ubHk=
+  #echo -n 'password' | base64
+  SECURITY_VIEWER_PASS: cGFzc3dvcmQ=
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: allure-be-dev
+  namespace: dev
+  labels:
+    app: allure-be-dev
+    chart: allure-be-0.1.0
+    release: allure-be-dev
+    heritage: Helm
+spec:
+  type: NodePort
+  ports:
+    - port: 80
+      targetPort: 5050
+      protocol: TCP
+      name: http
+  selector:
+    app: allure-be-dev
+    chart: allure-be-0.1.0
+    release: allure-be-dev
+    heritage: Helm
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: allure-be-dev
+  namespace: dev
+spec:
+  replicas: 1
+  strategy:
+    type: "Recreate"
+  selector:
+    matchLabels:
+      app: allure-be-dev
+      chart: allure-be-0.1.0
+      release: allure-be-dev
+      heritage: Helm
+  strategy:
+    type: "Recreate"
+  template:
+    metadata:
+      annotations:
+        checksum: checksum18
+      name: allure-be-dev
+      labels:
+        app: allure-be-dev
+        chart: allure-be-0.1.0
+        release: allure-be-dev
+        heritage: Helm
+    spec:
+      containers:
+        - name: allure-be-dev
+          image: 'frankescobar/allure-docker-service'
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5050
+          readinessProbe:
+            httpGet:
+              path: /version
+              port: 5050
+            failureThreshold: 3
+            initialDelaySeconds: 5
+            periodSeconds: 30
+            successThreshold: 1
+          # securityContext:
+          #   runAsUser: 1000
+          #   runAsGroup: 1000
+          envFrom:
+            - configMapRef:
+                name: allure-be-dev
+            - secretRef:
+                name: allure-be-dev
+          volumeMounts:
+            - name: reports-volume
+              mountPath: /app/projects
+
+      ## because default user allure does not have write permission so we need workaroung here
+      ## use init container to allow permission
+      initContainers:
+        - name: permission-fix
+          image: busybox
+          command: ["/bin/chmod","-R","777", "/data"]
+          volumeMounts:
+          - name: reports-volume
+            mountPath: /data
+
+      ## refer: https://kubernetes.io/docs/concepts/storage/volumes/#awselasticblockstore
+      volumes:
+        - name: reports-volume
+          awsElasticBlockStore:
+            volumeID: "vol-09zbcxyz"
+            fsType: ext4
+
+## https://github.com/fescobar/allure-docker-service#x-csrf-token
+## because when we enable security feature, allure using csrf_access_token to authenticate
+## and this token is save to allure api server domain :v
+## that why we need to set up be and fe in a single domain
+## only change the path /be and /fe
+## notes: you can set fe and be 2 domains, each of these have a domain, but can not use security feature
+## I use traefik v2 as ingress controller, you can parse to your config 's ingress controller: nginx, istio, ...
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: allure-be-dev-web
+  namespace: dev
+  annotations:
+    meta.helm.sh/release-name: allure-be-dev
+  labels:
+    app: allure-be-dev
+    app.kubernetes.io/managed-by: Helm
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      match: Host(`allure-dev.example.com`) && PathPrefix(`/be`)
+      priority: 1
+      services:
+        - kind: Service
+          name: allure-be-dev
+          port: 80
+    - kind: Rule
+      match: Host(`allure-dev.example.com`) && PathPrefix(`/fe`)
+      priority: 1
+      services:
+        - kind: Service
+          name: allure-fe-dev
+          port: 80
+    - kind: Rule
+      match: Host(`allure-dev.example.com`) && PathPrefix(`/`)
+      priority: 1
+      services:
+        - kind: Service
+          name: allure-fe-dev
+          port: 80
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: allure-be-dev-websecure
+  namespace: dev
+  annotations:
+    meta.helm.sh/release-name: allure-be-dev
+  labels:
+    app: allure-be-dev
+    app.kubernetes.io/managed-by: Helm
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`allure-dev.example.com`) && PathPrefix(`/be`)
+      priority: 1
+      services:
+        - kind: Service
+          name: allure-be-dev
+          port: 80
+    - kind: Rule
+      match: Host(`allure-dev.example.com`) && PathPrefix(`/fe`)
+      priority: 1
+      services:
+        - kind: Service
+          name: allure-fe-dev
+          port: 80
+    - kind: Rule
+      match: Host(`allure-dev.example.com`) && PathPrefix(`/`)
+      priority: 1
+      services:
+        - kind: Service
+          name: allure-fe-dev
+          port: 80
+  tls:
+    options:
+      name: default-tlsoption
+      namespace: default
+
+
